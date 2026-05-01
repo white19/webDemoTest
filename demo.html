@@ -80,34 +80,10 @@
 			font-weight: 600;
 			color: #0f172a;
 		}
-		.traffic-cell {
-			display: flex;
-			flex-direction: column;
-			gap: 8px;
-		}
-		.bar-wrap {
-			width: 100%;
-			min-height: 10px;
-			background: #e2e8f0;
-			border-radius: 999px;
-			overflow: hidden;
-		}
-		.bar {
-			height: 10px;
-			border-radius: 999px;
-		}
-		.bar.inbound {
-			background: #38bdf8;
-		}
-		.bar.outbound {
-			background: #818cf8;
-		}
-		.traffic-labels {
-			display: flex;
-			justify-content: flex-start;
-			gap: 14px;
-			color: #475569;
-			font-size: 0.88rem;
+		canvas {
+			display: block;
+			margin: 0 auto;
+			max-width: 100%;
 		}
 		.legend {
 			display: inline-flex;
@@ -151,7 +127,12 @@
 					<strong id="total-outbound">0 MB</strong>
 				</div>
 			</div>
-			<table>
+			<div class="legend" style="margin-bottom: 20px;">
+				<span class="legend-dot" style="background: #38bdf8;"></span> 進站
+				<span class="legend-dot" style="background: #818cf8;"></span> 出站
+			</div>
+			<canvas id="traffic-chart"></canvas>
+			<table style="margin-top: 32px;">
 				<thead>
 					<tr>
 						<th>日期</th>
@@ -161,10 +142,6 @@
 				</thead>
 				<tbody id="traffic-table-body"></tbody>
 			</table>
-			<div class="legend">
-				<span class="legend-dot" style="background: #38bdf8;"></span> 進站
-				<span class="legend-dot" style="background: #818cf8;"></span> 出站
-			</div>
 		</div>
 	</div>
 	<script>
@@ -189,38 +166,128 @@
 		let totalInbound = 0;
 		let totalOutbound = 0;
 
-		const maxValue = Math.max(
-			...trafficData.map((item) => Math.max(item.inboundMB, item.outboundMB))
-		);
-
 		trafficData.forEach((item) => {
 			totalInbound += item.inboundMB;
 			totalOutbound += item.outboundMB;
 
-			const inboundRatio = (item.inboundMB / maxValue) * 100;
-			const outboundRatio = (item.outboundMB / maxValue) * 100;
-
 			const row = document.createElement('tr');
 			row.innerHTML = `
 				<td>${item.day}</td>
-				<td>
-					<div class="traffic-cell">
-						<div>${item.inboundMB} MB</div>
-						<div class="bar-wrap"><div class="bar inbound" style="width: ${inboundRatio}%;"></div></div>
-					</div>
-				</td>
-				<td>
-					<div class="traffic-cell">
-						<div>${item.outboundMB} MB</div>
-						<div class="bar-wrap"><div class="bar outbound" style="width: ${outboundRatio}%;"></div></div>
-					</div>
-				</td>
+				<td>${item.inboundMB} MB</td>
+				<td>${item.outboundMB} MB</td>
 			`;
 			tableBody.appendChild(row);
 		});
 
 		totalInboundEl.textContent = `${totalInbound.toLocaleString()} MB`;
 		totalOutboundEl.textContent = `${totalOutbound.toLocaleString()} MB`;
+
+		// Draw line chart
+		const canvas = document.getElementById('traffic-chart');
+		const ctx = canvas.getContext('2d');
+
+		const padding = 50;
+		const chartWidth = canvas.clientWidth - 2 * padding;
+		const chartHeight = 300;
+
+		canvas.width = canvas.clientWidth * window.devicePixelRatio;
+		canvas.height = (chartHeight + 2 * padding) * window.devicePixelRatio;
+
+		const scale = window.devicePixelRatio;
+		ctx.scale(scale, scale);
+
+		// Get max value for Y axis
+		const maxY = Math.max(
+			...trafficData.map(item => Math.max(item.inboundMB, item.outboundMB))
+		);
+		const yStep = Math.ceil(maxY / 5 / 100) * 100;
+
+		// Draw background grid
+		ctx.strokeStyle = '#e2e8f0';
+		ctx.lineWidth = 1;
+		for (let i = 0; i <= 5; i++) {
+			const y = padding + (chartHeight / 5) * i;
+			ctx.beginPath();
+			ctx.moveTo(padding, y);
+			ctx.lineTo(padding + chartWidth, y);
+			ctx.stroke();
+
+			// Y axis labels
+			const value = maxY - (i * yStep);
+			ctx.fillStyle = '#64748b';
+			ctx.font = '12px system-ui';
+			ctx.textAlign = 'right';
+			ctx.fillText(value, padding - 10, y + 4);
+		}
+
+		// Draw X axis
+		ctx.strokeStyle = '#cbd5e1';
+		ctx.lineWidth = 2;
+		ctx.beginPath();
+		ctx.moveTo(padding, padding + chartHeight);
+		ctx.lineTo(padding + chartWidth, padding + chartHeight);
+		ctx.stroke();
+
+		// Draw Y axis
+		ctx.beginPath();
+		ctx.moveTo(padding, padding);
+		ctx.lineTo(padding, padding + chartHeight);
+		ctx.stroke();
+
+		const pointSpacing = chartWidth / (trafficData.length - 1);
+
+		// Helper function to draw line
+		function drawLine(data, color) {
+			ctx.strokeStyle = color;
+			ctx.lineWidth = 3;
+			ctx.lineJoin = 'round';
+			ctx.lineCap = 'round';
+
+			ctx.beginPath();
+			data.forEach((value, index) => {
+				const x = padding + index * pointSpacing;
+				const y = padding + chartHeight - (value / maxY) * chartHeight;
+				if (index === 0) {
+					ctx.moveTo(x, y);
+				} else {
+					ctx.lineTo(x, y);
+				}
+			});
+			ctx.stroke();
+
+			// Draw points
+			ctx.fillStyle = color;
+			data.forEach((value, index) => {
+				const x = padding + index * pointSpacing;
+				const y = padding + chartHeight - (value / maxY) * chartHeight;
+				ctx.beginPath();
+				ctx.arc(x, y, 5, 0, Math.PI * 2);
+				ctx.fill();
+			});
+		}
+
+		// Draw lines for inbound and outbound
+		drawLine(trafficData.map(item => item.inboundMB), '#38bdf8');
+		drawLine(trafficData.map(item => item.outboundMB), '#818cf8');
+
+		// Draw X axis labels
+		ctx.fillStyle = '#64748b';
+		ctx.font = '12px system-ui';
+		ctx.textAlign = 'center';
+		trafficData.forEach((item, index) => {
+			const x = padding + index * pointSpacing;
+			ctx.fillText(item.day, x, padding + chartHeight + 20);
+		});
+
+		// Draw Y axis label
+		ctx.save();
+		ctx.translate(15, padding + chartHeight / 2);
+		ctx.rotate(-Math.PI / 2);
+		ctx.fillStyle = '#64748b';
+		ctx.font = '12px system-ui';
+		ctx.textAlign = 'center';
+		ctx.fillText('流量 (MB)', 0, 0);
+		ctx.restore();
 	</script>
 </body>
 </html>
